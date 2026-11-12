@@ -19,6 +19,7 @@ parse = ["docling>=2.0"]
 ner = ["presidio-analyzer>=2.2", "spacy>=3.7"]
 # LLM-Anbindung (Cloud oder lokal) und lokale Embeddings
 llm = ["litellm>=1.50"]
+mcp = ["mcp>=2.0,<3"]
 embed = ["sentence-transformers>=3.0"]
 dev = ["pytest>=8"]
 

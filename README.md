@@ -126,6 +126,43 @@ docker compose run --rm app vokabular freigeben     # alle Vorschläge (oder ein
 docker compose run --rm app schild ke-42            # Textansicht eines Klingelschilds
 ```
 
+## Stand: Baustein 3 – Abfrage über Claude (MCP)
+
+- **Werkzeuge:** `tags_uebersicht` (Stufe 1), `klingelschilder_suchen` (Stufe 2, hybrid: Vektor + Volltext,
+  mit Filtern), `details_lesen` (Stufe 3, nur passende Abschnitte bis zum Token-Budget), `verweisen_folgen`,
+  `angebote_abfragen` (Datenpfad, exakte Werte, maßgebliche Fassung, Positionen aus Office)
+- **Rechte vor jeder Suche:** sichtbar ist, was einer Gruppe/dem Nutzer erlaubt und nicht verboten ist;
+  unvollständige Rechte nur für `GKB_ADMINS`. Gruppen des Nutzers kommen über den Nextcloud-Admin-Zugang.
+- **Pseudonymisiert:** Claude erhält nur Auszüge mit Kürzeln wie `[PERSON_0042]`; Klarnamen bleiben auf dem Server.
+- **Protokoll:** jede Abfrage mit Nutzer und Werkzeug (stderr, Standard `/tmp/gkb-mcp.log`).
+
+### Einrichtung für eine Person (Beispiel: michael)
+
+1. Auf dem eigenen Rechner einen eigenen Schlüssel nur für GKB erzeugen:
+   `ssh-keygen -t ed25519 -f ~/.ssh/gkb_mcp -C michael-gkb`
+2. Auf dem Server in `/home/gkb/.ssh/authorized_keys` eine Zeile mit erzwungenem Befehl ergänzen:
+   ```
+   command="/opt/gkb/scripts/mcp.sh michael",no-port-forwarding,no-agent-forwarding,no-X11-forwarding,no-pty ssh-ed25519 AAAA... michael-gkb
+   ```
+   Der Name nach `mcp.sh` ist der Nextcloud-Nutzername. Für Vollzugriff zusätzlich `GKB_ADMINS=michael` in `.env`.
+3. Einmal manuell verbinden, um den Server-Schlüssel zu bestätigen (sonst scheitert Claude an der Rückfrage):
+   `ssh -i ~/.ssh/gkb_mcp gkb@<server>` – die Verbindung bleibt stumm; mit Strg+C beenden.
+4. In Claude Desktop (*Einstellungen → Entwickler → Konfiguration bearbeiten*) eintragen:
+   ```json
+   {
+     "mcpServers": {
+       "gkb": {
+         "command": "ssh",
+         "args": ["-T", "-i", "/Users/michael/.ssh/gkb_mcp", "gkb@<server>"]
+       }
+     }
+   }
+   ```
+   Unter Windows den Pfad als `C:\\Users\\<name>\\.ssh\\gkb_mcp` angeben. Claude Desktop neu starten.
+5. Die IP des Rechners muss in der Firewall freigegeben sein (`ADMIN_CIDR` bzw. Hetzner-Firewall), z. B. über VPN.
+
+Voraussetzung auf dem Server: Datenbank läuft (`docker compose up -d db`), Image ist aktuell gebaut.
+
 ## Entwicklung
 
 ```bash
@@ -137,5 +174,4 @@ GKB_TEST_DATABASE_URL=postgresql://gkb:gkb@localhost:5432/gkb pytest   # inkl. D
 ## Nächste Bausteine
 
 2b. Duplikate Stufe 3 und 4 (Fast-Duplikate, semantische Dubletten)
-3. Abfragen: vier Vergleichsvarianten, MCP-Server
-4. Messen: Messumgebung über das Evaluationsset
+4. Messen: Vergleichsvarianten (klassisches RAG, alle Schilder im Kontext, Stufen-Navigation) über das Evaluationsset

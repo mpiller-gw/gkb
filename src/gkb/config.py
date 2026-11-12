@@ -26,6 +26,9 @@ class Settings(BaseSettings):
     nextcloud_admin_user: str = ""
     nextcloud_admin_password: str = ""
 
+    # Baustein 3: Abfrage – Nextcloud-Nutzernamen mit Vollzugriff (auch auf unvollständige Rechte)
+    admins: str = ""
+
     # Baustein 2: Aufbereitung
     modell_klein: str = ""                    # LiteLLM-Modellname für Tags, Klingelschilder, Fakten
     modell_klein_api_base: str = ""           # nur für lokale Modelle, z. B. http://llm:8000/v1

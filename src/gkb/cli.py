@@ -27,6 +27,8 @@ def main(argv: list[str] | None = None) -> None:
     sch = sub.add_parser("schild", help="Textansicht eines Klingelschilds anzeigen")
     sch.add_argument("id")
     sub.add_parser("systemcheck", help="GPU, Docling, Embeddings und LLM-Verbindung prüfen")
+    mcp = sub.add_parser("mcp", help="MCP-Server über stdio starten (für Claude, per SSH)")
+    mcp.add_argument("--nutzer", required=True, help="Nextcloud-Nutzername; bestimmt die Rechte")
     inv = sub.add_parser("inventur", help="Bestandsaufnahme der Nextcloud-Ordner ohne Download")
     inv.add_argument("--tiefe", type=int, default=1, help="Ordnerebenen für die Aufschlüsselung")
     inv.add_argument("--stichprobe", type=int, default=0,
@@ -35,8 +37,19 @@ def main(argv: list[str] | None = None) -> None:
     inv.add_argument("--preis-aus", type=float, help="USD je Mio. Ausgabe-Tokens des kleinen Modells")
     args = parser.parse_args(argv)
 
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    # Protokoll immer auf stderr: stdout gehört beim MCP-Server dem Protokoll
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s",
+                        stream=__import__("sys").stderr)
     s = get_settings()
+
+    if args.cmd == "mcp":
+        from gkb.abfrage.server import baue_server
+        from gkb.abfrage.zugriff import nutzer_laden
+        from gkb.aufbereitung.embeddings import SentenceTransformerEmbedder
+        nutzer = nutzer_laden(args.nutzer, s)
+        logging.info("MCP-Server für %s (admin=%s, %d Principals)", nutzer.id, nutzer.admin, len(nutzer.principals))
+        baue_server(lambda: connect(s.database_url), SentenceTransformerEmbedder(s.embedding_modell), nutzer).run("stdio")
+        return
 
     if args.cmd == "systemcheck":    # braucht weder Datenbank noch Tresor
         from gkb.systemcheck import pruefen
