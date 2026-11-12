@@ -157,7 +157,7 @@ def _einheit(conn, llm: LLM, embedder: Embedder, vok: Vokabular, zu: Zuordnung, 
         )
 
     # 2. Klingelschild
-    e = frage(llm, system_schild(),
+    e = frage(llm, system_schild(vok.werte("dokumenttyp")),
               user_schild(doc["titel"], kuerze(doc["markdown_pseudo"]), vok.themen,
                           kunde and kunde["name"], projekt and projekt["name"]),
               SchildEntwurf)
@@ -169,6 +169,8 @@ def _einheit(conn, llm: LLM, embedder: Embedder, vok: Vokabular, zu: Zuordnung, 
     for t in e.themen:
         if not vok.aufloesen("thema", t):
             vorschlagen(conn, "thema", t)
+    if e.dokumenttyp and not vok.aufloesen("dokumenttyp", e.dokumenttyp):
+        vorschlagen(conn, "dokumenttyp", e.dokumenttyp)   # bis zur Freigabe als "Sonstiges" getaggt
     tags = _tags(vok, roh, wissensraum, kunde, projekt)
 
     entitaeten = []

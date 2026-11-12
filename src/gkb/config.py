@@ -28,6 +28,7 @@ class Settings(BaseSettings):
 
     # Baustein 2: Aufbereitung
     modell_klein: str = ""                    # LiteLLM-Modellname für Tags, Klingelschilder, Fakten
+    modell_klein_api_base: str = ""           # nur für lokale Modelle, z. B. http://llm:8000/v1
     embedding_modell: str = "intfloat/multilingual-e5-large"
     kunde_ebene: int = 1                      # Ordnerebene unter dem Wurzelordner mit dem Kundennamen (0 = aus)
     projekt_ebene: int = 2                    # Ordnerebene mit dem Projekt (0 = aus)

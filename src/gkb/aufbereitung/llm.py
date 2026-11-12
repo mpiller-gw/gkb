@@ -25,21 +25,37 @@ class LLM(Protocol):
     def json(self, system: str, user: str) -> dict: ...
 
 
-class LiteLLM:
-    """Anbindung über LiteLLM (Extra 'llm'); Modellname z. B. 'anthropic/<modell>' oder 'ollama/<modell>'."""
+LOKALE_ANBIETER = ("hosted_vllm/", "ollama/", "ollama_chat/", "openai/")
 
-    def __init__(self, model: str, max_tokens: int = 2000):
+
+class LiteLLM:
+    """Anbindung über LiteLLM (Extra 'llm').
+
+    Cloud:  'anthropic/<modell>' (API-Schlüssel nach LiteLLM-Konvention, z. B. ANTHROPIC_API_KEY)
+    Lokal:  'hosted_vllm/gkb-lokal' mit api_base 'http://llm:8000/v1' (Dienst "llm" in docker-compose.gpu.yml)
+    """
+
+    def __init__(self, model: str, max_tokens: int = 2000, api_base: str | None = None):
         import litellm  # noqa: F401  (Fehler früh, falls Extra fehlt)
         self.name = model
         self.max_tokens = max_tokens
+        self.api_base = api_base or None
+        self.lokal = model.startswith(LOKALE_ANBIETER)
 
     def json(self, system: str, user: str) -> dict:
         import litellm
+        extra = {}
+        if self.api_base:
+            extra["api_base"] = self.api_base
+        if self.lokal:
+            # vLLM/Ollama erzwingen damit syntaktisch gültiges JSON (hilft kleineren Modellen sehr)
+            extra["response_format"] = {"type": "json_object"}
         r = litellm.completion(
             model=self.name,
             max_tokens=self.max_tokens,
             temperature=0,
             messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
+            **extra,
         )
         return _parse_json(r.choices[0].message.content)
 

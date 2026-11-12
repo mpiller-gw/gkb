@@ -8,13 +8,24 @@ from __future__ import annotations
 import re
 
 FEST = {
+    # Allgemeine Unternehmensdokumente; weitere Typen wachsen wie die Themen über Vorschläge
     "dokumenttyp": {
         "Angebot": ["Offerte", "Kostenvoranschlag", "Quote"],
-        "Projektbeschreibung": ["Projektsteckbrief", "Projektskizze"],
-        "Konzept": ["Grobkonzept", "Feinkonzept"],
-        "Protokoll": ["Besprechungsprotokoll", "Meeting-Notiz"],
-        "Vertrag": ["Rahmenvertrag", "Auftrag"],
+        "Auftrag": ["Auftragsbestätigung", "Bestellung"],
+        "Rechnung": ["Gutschrift"],
+        "Vertrag": ["Rahmenvertrag", "Vereinbarung", "NDA", "Geheimhaltungsvereinbarung"],
+        "Projektbeschreibung": ["Projektsteckbrief", "Projektskizze", "Briefing"],
+        "Konzept": ["Grobkonzept", "Feinkonzept", "Strategie"],
         "Präsentation": ["Pitch", "Folien"],
+        "Protokoll": ["Besprechungsprotokoll", "Meeting-Notiz", "Gesprächsnotiz"],
+        "Bericht": ["Report", "Auswertung", "Analyse"],
+        "Richtlinie": ["Policy", "Handbuch", "Leitfaden", "Arbeitsanweisung"],
+        "Prozessbeschreibung": ["Prozess", "SOP", "Checkliste"],
+        "Vorlage": ["Template", "Formular", "Muster"],
+        "Korrespondenz": ["Brief", "E-Mail", "Anschreiben"],
+        "Personalunterlage": ["Arbeitsvertrag", "Zeugnis", "Bewerbung", "Stellenbeschreibung"],
+        "Finanzunterlage": ["Budget", "Kalkulation", "Businessplan", "Jahresabschluss"],
+        "Technische Dokumentation": ["Spezifikation", "Anleitung", "Datenblatt"],
         "Sonstiges": [],
     },
     "status": {w: [] for w in ["Entwurf", "versendet", "angenommen", "abgelehnt", "abgeschlossen"]},
@@ -55,6 +66,9 @@ class Vokabular:
             if len(werte) == 1:
                 self._map.setdefault(("thema", seg), werte[0])
 
+    def werte(self, facette: str) -> list[str]:
+        return sorted({w for (f, _), w in self._map.items() if f == facette})
+
     def aufloesen(self, facette: str, wert: str | None) -> str | None:
         if not wert:
             return None
@@ -70,6 +84,7 @@ def vorschlagen(conn, facette: str, wert: str) -> None:
 
 
 def freigeben(conn, werte: list[str] | None, facette: str = "thema") -> int:
+    """Vorschläge einer Facette (thema, dokumenttyp) freigeben – alle oder nur die genannten."""
     if werte:
         n = conn.execute(
             "UPDATE vokabular SET status='aktiv' WHERE facette=%s AND status='vorschlag' AND wert = ANY(%s)",

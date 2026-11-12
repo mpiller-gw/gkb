@@ -23,8 +23,10 @@ def main(argv: list[str] | None = None) -> None:
     vok = sub.add_parser("vokabular", help="Themenvokabular verwalten")
     vok.add_argument("aktion", choices=["liste", "vorschlagen", "freigeben"])
     vok.add_argument("werte", nargs="*", help="bei 'freigeben': einzelne Werte (ohne Angabe: alle Vorschläge)")
+    vok.add_argument("--facette", default="thema", choices=["thema", "dokumenttyp"])
     sch = sub.add_parser("schild", help="Textansicht eines Klingelschilds anzeigen")
     sch.add_argument("id")
+    sub.add_parser("systemcheck", help="GPU, Docling, Embeddings und LLM-Verbindung prüfen")
     inv = sub.add_parser("inventur", help="Bestandsaufnahme der Nextcloud-Ordner ohne Download")
     inv.add_argument("--tiefe", type=int, default=1, help="Ordnerebenen für die Aufschlüsselung")
     inv.add_argument("--stichprobe", type=int, default=0,
@@ -35,6 +37,10 @@ def main(argv: list[str] | None = None) -> None:
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     s = get_settings()
+
+    if args.cmd == "systemcheck":    # braucht weder Datenbank noch Tresor
+        from gkb.systemcheck import pruefen
+        raise SystemExit(0 if pruefen(s) else 1)
 
     if args.cmd == "inventur":       # braucht weder Datenbank noch Tresor
         from gkb.connectors.nextcloud import NextcloudClient
@@ -106,7 +112,7 @@ def main(argv: list[str] | None = None) -> None:
         from gkb.aufbereitung import vokabular as v
         if args.aktion == "liste":
             for r in conn.execute("SELECT facette, wert, status, anzahl FROM vokabular "
-                                  "WHERE facette='thema' ORDER BY status, anzahl DESC, wert"):
+                                  "WHERE facette=%s ORDER BY status, anzahl DESC, wert", (args.facette,)):
                 print(f"{r['status']:10} {r['anzahl']:4}  {r['wert']}")
         elif args.aktion == "vorschlagen":
             from gkb.aufbereitung.run import vokabular_vorschlagen
@@ -114,7 +120,7 @@ def main(argv: list[str] | None = None) -> None:
             for t in vokabular_vorschlagen(conn, llm):
                 print("Vorschlag:", t)
         else:
-            print(f"{v.freigeben(conn, args.werte or None)} Themen freigegeben. "
+            print(f"{v.freigeben(conn, args.werte or None, args.facette)} Werte ({args.facette}) freigegeben. "
                   "Nächstes 'gkb aufbereiten' vergibt sie als Tags (ohne LLM-Kosten).")
         return
 
@@ -137,7 +143,7 @@ def _modelle(s, trocken: bool, nur_llm: bool = False):
     if not s.modell_klein:
         raise SystemExit("GKB_MODELL_KLEIN ist nicht gesetzt (oder --trocken verwenden)")
     from gkb.aufbereitung.llm import LiteLLM
-    llm = LiteLLM(s.modell_klein)
+    llm = LiteLLM(s.modell_klein, api_base=s.modell_klein_api_base)
     if nur_llm:
         return llm, None
     from gkb.aufbereitung.embeddings import SentenceTransformerEmbedder

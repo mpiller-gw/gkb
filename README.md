@@ -27,8 +27,10 @@ Konzept: [GKB – Konzept: KI-Wissensschicht](https://claude.ai/artifact/Ap4L6vt
 ## Stand: Baustein 2 – Aufbereitung
 
 - **Abschnitte** (Stufe 3) entlang der Überschriften, mit Embedding und deutschem Volltextindex
-- **Tags** (Stufe 1) aus kontrolliertem Vokabular; neue Themen landen als Vorschlag
-  (`gkb vokabular liste | vorschlagen | freigeben`), freigegebene Themen werden ohne LLM-Kosten nachgetragen
+- **Tags** (Stufe 1) aus kontrolliertem Vokabular; neue Themen und Dokumenttypen landen als Vorschlag
+  (`gkb vokabular liste|vorschlagen|freigeben [--facette thema|dokumenttyp]`), freigegebene Werte werden
+  ohne LLM-Kosten nachgetragen. Vorbelegt sind allgemeine Unternehmensdokumente (Angebot, Vertrag, Rechnung,
+  Richtlinie, Prozessbeschreibung, Bericht, Personal-/Finanzunterlage …)
 - **Klingelschilder** (Stufe 2) je Dokument: gespeicherte Form (JSON) und kompakte Textansicht fürs LLM,
   Kunde und Projekt aus dem Ordnerpfad, Lexoffice-Kundennummer als ID, Pseudonym-Kürzel als Personen
 - **Cluster-Schilder** Projekt → Kunde → Wissensraum, je Rechte-Partition
@@ -60,6 +62,28 @@ docker compose run --rm app init-db
 
 Nach einem Neustart des Servers: `sudo bash scripts/volume-verschluesseln.sh --entsperren <gerät>`,
 dann `docker compose up -d db`. Die Passphrase liegt bewusst nicht auf dem Server.
+
+**GPU (Hetzner GEX44, RTX 4000 SFF Ada 20 GB):**
+
+```bash
+sudo bash scripts/gpu-setup.sh          # Treiber + NVIDIA Container Toolkit, danach Neustart
+# in .env:  COMPOSE_FILE=docker-compose.yml:docker-compose.gpu.yml
+docker compose build app
+docker compose run --rm --no-deps app systemcheck      # GPU, Docling, Embeddings, LLM prüfen
+```
+
+Mit GPU laufen Docling (Layout, OCR) und die Embeddings auf der Grafikkarte. Optional ein lokales
+Sprachmodell über vLLM als eigener Container (nur im internen Netz):
+
+```bash
+# in .env: GKB_MODELL_KLEIN=hosted_vllm/gkb-lokal und GKB_MODELL_KLEIN_API_BASE=http://llm:8000/v1
+docker compose --profile lokal up -d llm     # lädt beim ersten Start das Modell (GKB_LLM_MODELL)
+docker compose logs -f llm                   # warten bis "Application startup complete"
+docker compose run --rm --no-deps app systemcheck
+```
+
+GPU-Speicher teilen sich vLLM (`GKB_LLM_GPU_ANTEIL`, Standard 60 %) und Docling/Embeddings.
+Für große Sync-Läufe vLLM vorher stoppen (`docker compose stop llm`).
 
 **Backup:** täglich 02:30 über `gkb-backup.timer` – Datenbank-Dump und Originale, verschlüsselt mit
 restic, z. B. auf eine Hetzner Storage Box (`/etc/gkb/backup.env`). Nicht im Backup und deshalb

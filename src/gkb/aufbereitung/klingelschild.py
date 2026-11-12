@@ -11,6 +11,7 @@ PROMPT_VERSION = "ks-v1.0"
 CLUSTER_PROMPT_VERSION = "cl-v1.0"
 MAX_INHALT_TOKENS = 6000
 
+# Startliste; die gültigen Typen kommen aus dem Vokabular (Facette "dokumenttyp") und sind erweiterbar
 DOKUMENTTYPEN = ["Angebot", "Projektbeschreibung", "Konzept", "Protokoll", "Vertrag", "Präsentation", "Sonstiges"]
 
 
@@ -81,7 +82,7 @@ Antworte nur mit JSON in diesem Format:
   "titel": "max. 12 Wörter",
   "kurzbeschreibung": "2-3 Sätze, max. 60 Wörter: worum geht es, was ist das Besondere",
   "beantwortet_fragen": ["3 bis 5 konkrete Fragen, die dieses Dokument beantwortet"],
-  "dokumenttyp": "einer von: %(typen)s",
+  "dokumenttyp": "bevorzugt einer von: %(typen)s; passt keiner, ein eigener kurzer Vorschlag",
   "themen": ["1 bis 3 Themen, bevorzugt aus der Liste bekannter Themen, sonst eigener kurzer Vorschlag"],
   "zeitraum": "JJJJ oder JJJJ-Qn, auf den sich das Dokument bezieht, oder null",
   "status": "Entwurf | versendet | angenommen | abgelehnt | abgeschlossen | null",
@@ -101,8 +102,8 @@ Antworte nur mit JSON:
  "beantwortet_fragen": ["3 bis 5 Fragen, die diese Gruppe insgesamt beantwortet"]}"""
 
 
-def system_schild() -> str:
-    return SYSTEM_SCHILD % {"typen": ", ".join(DOKUMENTTYPEN)}
+def system_schild(typen: list[str] | None = None) -> str:
+    return SYSTEM_SCHILD % {"typen": ", ".join(typen or DOKUMENTTYPEN)}
 
 
 def user_schild(titel: str, inhalt: str, themen: list[str], kunde: str | None, projekt: str | None) -> str:

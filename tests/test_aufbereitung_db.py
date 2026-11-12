@@ -93,11 +93,18 @@ def test_aufbereitung_ablauf():
     d_docx = doc("2", "Projekte/Beispiel GmbH/Relaunch 2025/Angebot v3.docx", ANGEBOT.replace("48.500,00\n", "49.500,00\n"))
     doc("3", "Projekte/Beispiel GmbH/Relaunch 2025/Konzept.md", "# Konzept\n\nKonzept für den Relaunch 2025.")
     doc("4", "Projekte/Allgemein.md", "# Leitfaden\n\nInterne Hinweise.")
+    d_rk = doc("5", "Projekte/Reisekosten.md", "# Abrechnung\n\nReisekosten März.")
     conn.commit()
 
     llm, emb = ZaehlLLM(), HashEmbedder()
     z = aufbereiten(conn, llm, emb, pseudo)
-    assert z["neu"] == 4 and z["fehler"] == 0
+    assert z["neu"] == 5 and z["fehler"] == 0
+
+    # Unbekannter Dokumenttyp: Vorschlag, bis zur Freigabe "Sonstiges"
+    assert conn.execute("SELECT tags FROM klingelschild WHERE id=%s", (f"ke-{d_rk}",)).fetchone()["tags"][
+        "dokumenttyp"] == "Sonstiges"
+    assert conn.execute("SELECT status FROM vokabular WHERE facette='dokumenttyp' AND wert='Reisekostenabrechnung'"
+                        ).fetchone()["status"] == "vorschlag"
 
     # Faktentabelle: PDF plausibel, DOCX nicht; Fassungen weichen ab -> beide prüfen
     a = {r["rohdokument_id"]: r for r in conn.execute("SELECT * FROM angebot").fetchall()}
@@ -126,13 +133,16 @@ def test_aufbereitung_ablauf():
     # Zweiter Lauf: nichts geändert -> keine LLM-Aufrufe
     llm.aufrufe = 0
     z = aufbereiten(conn, llm, emb, pseudo)
-    assert z["unveraendert"] == 4 and llm.aufrufe == 0
+    assert z["unveraendert"] == 5 and llm.aufrufe == 0
 
     # Themen freigeben -> Tags ohne LLM
     assert conn.execute("SELECT count(*) AS n FROM vokabular WHERE status='vorschlag'").fetchone()["n"] >= 1
     vokabular.freigeben(conn, None)
+    vokabular.freigeben(conn, ["Reisekostenabrechnung"], "dokumenttyp")
     z = aufbereiten(conn, llm, emb, pseudo)
     assert llm.aufrufe == 0
+    assert conn.execute("SELECT tags FROM klingelschild WHERE id=%s", (f"ke-{d_rk}",)).fetchone()["tags"][
+        "dokumenttyp"] == "Reisekostenabrechnung"
     s = conn.execute("SELECT tags FROM klingelschild WHERE id=%s", (f"ke-{d_pdf}",)).fetchone()
     assert s["tags"]["thema"]
 

@@ -41,7 +41,8 @@ class PlatzhalterLLM:
     def _schild(self, user: str, doc: str) -> dict:
         datei = re.search(r"Dateiname: (.+)", user).group(1).strip()
         typ = "Angebot" if re.search(r"angebot", datei + doc, re.I) else (
-            "Protokoll" if re.search(r"protokoll", datei + doc, re.I) else "Projektbeschreibung")
+            "Protokoll" if re.search(r"protokoll", datei + doc, re.I) else (
+                "Reisekostenabrechnung" if re.search(r"abrechnung", datei + doc, re.I) else "Projektbeschreibung"))
         jahr = re.search(r"\b(20\d\d)\b", doc)
         erster_satz = re.sub(r"\s+", " ", re.sub(r"[#|*\-]", " ", doc)).strip()[:200]
         kurz = " ".join(erster_satz.split()[:40]) or "Kein Inhalt."
