@@ -71,6 +71,17 @@ Kundenliste importieren (Export nach `./import/` legen):
 docker compose run --rm app import-kunden /import/kunden.xlsx
 ```
 
+Bestandsaufnahme vor dem ersten Einlesen (nur Dateiliste, kein Download, keine Datenbank nötig):
+
+```bash
+docker compose run --rm --no-deps app inventur                     # Anzahl/Größe je Unterordner und Dateityp
+docker compose run --rm --no-deps app inventur --stichprobe 30 \
+    --preis-ein <USD je Mio. Tokens> --preis-aus <USD je Mio. Tokens>   # misst Textmenge und Dauer, rechnet hoch
+```
+
+Die Stichprobe lädt und wandelt N zufällige Dateien nur im Arbeitsspeicher um; nichts wird gespeichert
+oder an ein LLM gesendet. Tipp: `GKB_NEXTCLOUD_ROOTS` zuerst auf einen Ausschnitt setzen (z. B. `Sales/2025`).
+
 Nextcloud einlesen:
 
 ```bash

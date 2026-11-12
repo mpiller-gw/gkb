@@ -25,10 +25,33 @@ def main(argv: list[str] | None = None) -> None:
     vok.add_argument("werte", nargs="*", help="bei 'freigeben': einzelne Werte (ohne Angabe: alle Vorschläge)")
     sch = sub.add_parser("schild", help="Textansicht eines Klingelschilds anzeigen")
     sch.add_argument("id")
+    inv = sub.add_parser("inventur", help="Bestandsaufnahme der Nextcloud-Ordner ohne Download")
+    inv.add_argument("--tiefe", type=int, default=1, help="Ordnerebenen für die Aufschlüsselung")
+    inv.add_argument("--stichprobe", type=int, default=0,
+                     help="N Dateien laden und umwandeln, um Textmenge und Dauer zu messen (nichts wird gespeichert)")
+    inv.add_argument("--preis-ein", type=float, help="USD je Mio. Eingabe-Tokens des kleinen Modells")
+    inv.add_argument("--preis-aus", type=float, help="USD je Mio. Ausgabe-Tokens des kleinen Modells")
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     s = get_settings()
+
+    if args.cmd == "inventur":       # braucht weder Datenbank noch Tresor
+        from gkb.connectors.nextcloud import NextcloudClient
+        from gkb.inventur import bericht, erfasse, hochrechnen, stichprobe
+        if not s.roots:
+            raise SystemExit("GKB_NEXTCLOUD_ROOTS ist leer")
+        client = NextcloudClient(s.nextcloud_url, s.nextcloud_user, s.nextcloud_app_password)
+        try:
+            for root in s.roots:
+                inventur = erfasse(client.walk(root), root, args.tiefe)
+                messungen = stichprobe(inventur, client, args.stichprobe) if args.stichprobe else []
+                print(bericht(inventur, hochrechnen(inventur, messungen, args.preis_ein, args.preis_aus), root))
+                print()
+        finally:
+            client.close()
+        return
+
     conn = connect(s.database_url)
 
     if args.cmd == "init-db":
