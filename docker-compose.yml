@@ -1,0 +1,33 @@
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: gkb
+      POSTGRES_DB: gkb
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-gkb}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    # Kein Port nach außen: nur im internen Docker-Netz erreichbar
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gkb"]
+      interval: 5s
+      retries: 10
+
+  app:
+    build:
+      context: .
+      args:
+        WITH_NER: ${WITH_NER:-false}
+    env_file: .env
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - originale:/data/originale
+      - ./import:/import:ro
+    profiles: ["tools"]
+
+volumes:
+  pgdata:
+  originale:
