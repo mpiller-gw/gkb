@@ -6,6 +6,7 @@ import pytest
 from cryptography.fernet import Fernet
 
 from gkb.connectors.nextcloud import RemoteFile
+from gkb.connectors.nextcloud_rechte import PfadRechte
 from gkb.db import connect, init_db, quelle_id
 from gkb.ingest.pipeline import sync_nextcloud
 from gkb.ingest.pseudonymize import PgVault, Pseudonymizer
@@ -33,7 +34,7 @@ class FakeNextcloud:
 
 
 @pytest.fixture
-def conn():
+def conn():  # noqa: D401
     c = connect(URL)
     c.execute("DROP SCHEMA public CASCADE; CREATE SCHEMA public;")
     c.commit()
@@ -47,7 +48,7 @@ def test_sync_ablauf(conn, tmp_path):
     pseudo = Pseudonymizer(vault, ["Erika Muster"])
     qid = quelle_id(conn, "nextcloud", "test")
     nc = FakeNextcloud()
-    run = lambda: sync_nextcloud(conn, nc, pseudo, qid, "Projekte", str(tmp_path), 1)
+    run = lambda: sync_nextcloud(conn, nc, pseudo, qid, "Projekte", str(tmp_path), PfadRechte(1))
 
     nc.put("Projekte/Kunde A/Angebot.txt", "1", "e1", "Ansprechpartnerin Erika Muster, 48.500 EUR".encode())
     nc.put("Projekte/Kunde A/Bild.png", "2", "e1", b"\x89PNG")
@@ -56,15 +57,16 @@ def test_sync_ablauf(conn, tmp_path):
 
     doc = conn.execute("SELECT * FROM rohdokument WHERE externe_id='1'").fetchone()
     assert "Erika" not in doc["markdown_pseudo"] and "[PERSON_0001]" in doc["markdown_pseudo"]
-    assert doc["rechte_partition"] == "Projekte/Kunde A"
+    assert doc["rechte_partition"] == PfadRechte(1).partition("Projekte/Kunde A/x", "Projekte").id
     assert doc["deep_link"] == "https://cloud.test/f/1"
 
     assert run()["unveraendert"] == 1                      # Stufe 1: nichts zu tun
 
     nc.put("Projekte/Kunde B/Angebot.txt", "1", "e2", nc.files["1"][1])   # verschoben, Inhalt gleich
     assert run()["verschoben"] == 1
-    assert conn.execute("SELECT rechte_partition FROM rohdokument WHERE externe_id='1'").fetchone()[
-        "rechte_partition"] == "Projekte/Kunde B"
+    rp = conn.execute("SELECT rechte_partition FROM rohdokument WHERE externe_id='1'").fetchone()["rechte_partition"]
+    assert conn.execute("SELECT erlaubt FROM rechte_partition WHERE id=%s", (rp,)).fetchone()["erlaubt"] == [
+        "pfad:Projekte/Kunde B"]
 
     nc.put("Projekte/Kunde B/Kopie.txt", "3", "e1", nc.files["1"][1])    # Kopie unter neuer fileid
     assert run()["duplikat"] == 1

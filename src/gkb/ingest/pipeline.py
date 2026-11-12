@@ -18,6 +18,7 @@ from psycopg.types.json import Jsonb
 from gkb.connectors.nextcloud import NextcloudClient, RemoteFile
 from gkb.ingest.parse import is_supported, to_markdown
 from gkb.ingest.pseudonymize import Pseudonymizer
+from gkb.connectors.nextcloud_rechte import PfadRechte, speichere_partition
 from gkb.storage import store_original
 
 log = logging.getLogger(__name__)
@@ -25,12 +26,8 @@ PROZESS = "ingest-nextcloud-v1"
 
 
 def rechte_partition(path: str, root: str, depth: int) -> str:
-    """Pilot-Vereinfachung: Partition = Wurzelordner + die ersten `depth` Ordnerebenen.
-
-    TODO Baustein 1b: Freigaben und Gruppenordner-ACLs aus Nextcloud lesen.
-    """
-    rel = PurePosixPath(path).relative_to(root).parts[:-1]
-    return "/".join((root, *rel[:depth]))
+    """Pfad-Fallback (ohne Nextcloud-Rechte): Wurzelordner + die ersten `depth` Ordnerebenen."""
+    return PfadRechte(depth).partition(path, root).id
 
 
 @dataclass(frozen=True)
@@ -48,7 +45,8 @@ def entscheide(bestehend_sha: str | None, sha: str, duplikat_von: int | None) ->
 
 
 def sync_nextcloud(conn, client: NextcloudClient, pseudo: Pseudonymizer, quelle_id: int,
-                   root: str, storage_dir: str, partition_depth: int) -> Counter:
+                   root: str, storage_dir: str, rechte) -> Counter:
+    """`rechte`: NextcloudRechte (Freigaben + Gruppenordner) oder PfadRechte (Fallback)."""
     zaehler: Counter = Counter()
     lauf = conn.execute("INSERT INTO sync_lauf (quelle_id) VALUES (%s) RETURNING id", (quelle_id,)).fetchone()["id"]
     conn.commit()
@@ -65,9 +63,18 @@ def sync_nextcloud(conn, client: NextcloudClient, pseudo: Pseudonymizer, quelle_
             (quelle_id, f.fileid, f.etag),
         ).fetchone():
             zaehler["unveraendert"] += 1
+            # Rechte können sich ändern, ohne dass sich die Datei ändert
+            neu = speichere_partition(conn, rechte.partition(f.path, root))
+            if conn.execute(
+                """UPDATE rohdokument SET rechte_partition=%s, aktualisiert=now()
+                   WHERE quelle_id=%s AND externe_id=%s AND rechte_partition <> %s""",
+                (neu, quelle_id, f.fileid, neu),
+            ).rowcount:
+                zaehler["rechte_geaendert"] += 1
+            conn.commit()
             continue
         try:
-            status = _verarbeite(conn, client, pseudo, quelle_id, f, root, storage_dir, partition_depth)
+            status = _verarbeite(conn, client, pseudo, quelle_id, f, root, storage_dir, rechte)
             conn.commit()
         except Exception as e:  # eine fehlerhafte Datei darf den Lauf nicht abbrechen
             conn.rollback()
@@ -85,9 +92,9 @@ def sync_nextcloud(conn, client: NextcloudClient, pseudo: Pseudonymizer, quelle_
     # Nicht mehr vorhandene Dateien markieren (Löschung über Lineage folgt in Baustein 2)
     geloescht = conn.execute(
         """UPDATE rohdokument SET geloescht = true, aktualisiert = now()
-           WHERE quelle_id = %s AND NOT geloescht AND rechte_partition LIKE %s
+           WHERE quelle_id = %s AND NOT geloescht AND (pfad = %s OR pfad LIKE %s)
              AND NOT (externe_id = ANY(%s))""",
-        (quelle_id, f"{root}%", list(gesehen)),
+        (quelle_id, root, f"{root}/%", list(gesehen)),
     ).rowcount
     zaehler["geloescht"] += geloescht
     conn.execute("UPDATE sync_lauf SET ende = now(), zaehler = %s WHERE id = %s", (Jsonb(dict(zaehler)), lauf))
@@ -95,7 +102,7 @@ def sync_nextcloud(conn, client: NextcloudClient, pseudo: Pseudonymizer, quelle_
     return zaehler
 
 
-def _verarbeite(conn, client, pseudo, quelle_id, f: RemoteFile, root, storage_dir, depth) -> str:
+def _verarbeite(conn, client, pseudo, quelle_id, f: RemoteFile, root, storage_dir, rechte) -> str:
     data = client.download(f.path)
     sha, ablage = store_original(storage_dir, data, PurePosixPath(f.path).suffix.lower())
     bestehend = conn.execute(
@@ -120,7 +127,7 @@ def _verarbeite(conn, client, pseudo, quelle_id, f: RemoteFile, root, storage_di
         (quelle_id, f.fileid, f.etag, sha, f.path, deep_link, f.mime, f.size, f.modified, e.status, ablage),
     ).fetchone()["id"]
 
-    partition = rechte_partition(f.path, root, depth)
+    partition = speichere_partition(conn, rechte.partition(f.path, root))
     titel = pseudo.pseudonymize(PurePosixPath(f.path).stem)
 
     if e.status == "duplikat":

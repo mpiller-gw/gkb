@@ -9,12 +9,12 @@ WORKDIR /app
 COPY pyproject.toml ./
 COPY src ./src
 COPY db ./db
-RUN pip install --no-cache-dir -e ".[parse]"
+RUN pip install --no-cache-dir -e ".[parse,llm,embed]"
 
 # Optional: NER-Pseudonymisierung mit deutschem spaCy-Modell
 ARG WITH_NER=false
 RUN if [ "$WITH_NER" = "true" ]; then \
-        pip install --no-cache-dir -e ".[parse,ner]" && python -m spacy download de_core_news_lg; \
+        pip install --no-cache-dir -e ".[parse,llm,embed,ner]" && python -m spacy download de_core_news_lg; \
     fi
 
 ENTRYPOINT ["gkb"]

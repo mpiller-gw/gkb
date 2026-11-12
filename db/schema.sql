@@ -101,3 +101,113 @@ CREATE TABLE IF NOT EXISTS sync_lauf (
     ende        timestamptz,
     zaehler     jsonb NOT NULL DEFAULT '{}'
 );
+
+-- ============================================================================
+-- Baustein 1b: Rechte-Partitionen
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS rechte_partition (
+    id            text PRIMARY KEY,                -- rp-<hash> bzw. Pfad-Fallback
+    erlaubt       text[] NOT NULL,                 -- user:<id> | group:<id> | pfad:<ordner>
+    verboten      text[] NOT NULL DEFAULT '{}',
+    vollstaendig  boolean NOT NULL DEFAULT true,   -- false: nur Administratoren sehen den Inhalt
+    hinweis       text NOT NULL DEFAULT '',
+    erstellt      timestamptz NOT NULL DEFAULT now()
+);
+
+-- ============================================================================
+-- Baustein 2: Aufbereitung
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS projekt (
+    id      text PRIMARY KEY,                      -- abgeleitet aus dem Ordnerpfad
+    name    text NOT NULL,
+    kunde   text REFERENCES kunde(kundennummer),
+    pfad    text NOT NULL UNIQUE
+);
+
+-- Abschnitte (Stufe 3 und Grundlage für klassisches RAG)
+CREATE TABLE IF NOT EXISTS abschnitt (
+    id                bigserial PRIMARY KEY,
+    rohdokument_id    bigint NOT NULL REFERENCES rohdokument(id) ON DELETE CASCADE,
+    nr                int NOT NULL,
+    ueberschrift      text,
+    text              text NOT NULL,
+    tokens            int NOT NULL,
+    embedding         vector(1024),
+    tsv               tsvector GENERATED ALWAYS AS (to_tsvector('german', coalesce(ueberschrift,'') || ' ' || text)) STORED,
+    rechte_partition  text NOT NULL,
+    UNIQUE (rohdokument_id, nr)
+);
+CREATE INDEX IF NOT EXISTS abschnitt_tsv ON abschnitt USING gin (tsv);
+CREATE INDEX IF NOT EXISTS abschnitt_emb ON abschnitt USING hnsw (embedding vector_cosine_ops);
+CREATE INDEX IF NOT EXISTS abschnitt_rp ON abschnitt (rechte_partition);
+
+-- Kontrolliertes Vokabular (Stufe 1)
+CREATE TABLE IF NOT EXISTS vokabular (
+    facette   text NOT NULL,
+    wert      text NOT NULL,
+    eltern    text,
+    status    text NOT NULL DEFAULT 'aktiv' CHECK (status IN ('aktiv','vorschlag','abgelehnt')),
+    synonyme  text[] NOT NULL DEFAULT '{}',
+    anzahl    int NOT NULL DEFAULT 0,              -- wie oft vorgeschlagen bzw. vergeben
+    PRIMARY KEY (facette, wert)
+);
+
+-- Klingelschilder (Stufe 2): Einheiten und Cluster
+CREATE TABLE IF NOT EXISTS klingelschild (
+    id                text PRIMARY KEY,
+    typ               text NOT NULL CHECK (typ IN ('einheit','cluster')),
+    ebene             text NOT NULL,               -- einheit | projekt | kunde | wissensraum
+    schluessel        text NOT NULL,               -- rohdokument-ID bzw. Cluster-Schlüssel
+    rohdokument_id    bigint REFERENCES rohdokument(id) ON DELETE CASCADE,
+    eltern_id         text,
+    daten             jsonb NOT NULL,              -- gespeicherte Form (vollständig)
+    text_ansicht      text NOT NULL,               -- kompakte Ansicht für das LLM
+    tags              jsonb NOT NULL DEFAULT '{}', -- Filterfelder
+    embedding         vector(1024),
+    rechte_partition  text NOT NULL,
+    eingabe_hash      text NOT NULL,               -- unverändert -> nicht neu erzeugen
+    modell            text NOT NULL,
+    prompt_version    text NOT NULL,
+    aktualisiert      timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (ebene, schluessel, rechte_partition)
+);
+CREATE INDEX IF NOT EXISTS klingelschild_emb ON klingelschild USING hnsw (embedding vector_cosine_ops);
+CREATE INDEX IF NOT EXISTS klingelschild_tags ON klingelschild USING gin (tags);
+CREATE INDEX IF NOT EXISTS klingelschild_rp ON klingelschild (rechte_partition);
+
+-- Faktentabellen (Datenpfad)
+CREATE TABLE IF NOT EXISTS angebot (
+    rohdokument_id     bigint PRIMARY KEY REFERENCES rohdokument(id) ON DELETE CASCADE,
+    gruppe             text NOT NULL,              -- Ordner + Dateiname ohne Endung: verbindet Office- und PDF-Fassung
+    fassung            text NOT NULL CHECK (fassung IN ('office','pdf','sonstige')),
+    angebotsnummer     text,
+    version            text,
+    kunde              text,
+    projekt            text,
+    gesamt_netto       numeric,
+    summe_positionen   numeric,
+    gueltig_bis        date,
+    status             text NOT NULL CHECK (status IN ('ok','pruefen')),
+    pruefhinweis       text NOT NULL DEFAULT '',
+    rechte_partition   text NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS angebotsposition (
+    id                 bigserial PRIMARY KEY,
+    rohdokument_id     bigint NOT NULL REFERENCES rohdokument(id) ON DELETE CASCADE,
+    position           text,
+    leistung           text NOT NULL,
+    menge              numeric,
+    einheit            text,
+    einzelpreis        numeric,
+    gesamt             numeric,
+    rechte_partition   text NOT NULL
+);
+CREATE INDEX IF NOT EXISTS angebotsposition_doc ON angebotsposition (rohdokument_id);
+
+-- Sicht für den Datenpfad: nur die maßgebliche Fassung je Angebot (PDF vor Office)
+CREATE OR REPLACE VIEW angebot_massgeblich AS
+SELECT DISTINCT ON (a.gruppe) a.*, r.deep_link, r.titel
+FROM angebot a JOIN rohdokument r ON r.id = a.rohdokument_id
+WHERE NOT r.geloescht
+ORDER BY a.gruppe, CASE a.fassung WHEN 'pdf' THEN 0 WHEN 'office' THEN 1 ELSE 2 END;

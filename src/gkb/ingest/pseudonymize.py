@@ -117,6 +117,9 @@ RULES: list[tuple[str, re.Pattern]] = [
 ]
 
 
+DATUM = re.compile(r"\b\d{1,2}\.\d{1,2}\.(?:\d{4}|\d{2})\b")   # Datumsangaben sind keine Telefonnummern
+
+
 class Pseudonymizer:
     def __init__(self, vault: Vault, namen: Iterable[str] = (), use_ner: bool = False):
         self.vault = vault
@@ -131,7 +134,7 @@ class Pseudonymizer:
         hits: list[Treffer] = []
         for typ, pattern in RULES:
             for m in pattern.finditer(text):
-                if typ == "TELEFON" and sum(c.isdigit() for c in m.group()) < 8:
+                if typ == "TELEFON" and (sum(c.isdigit() for c in m.group()) < 8 or DATUM.search(m.group())):
                     continue
                 hits.append(Treffer(m.start(), m.end(), typ, m.group()))
         if self._namen_re:

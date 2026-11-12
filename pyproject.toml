@@ -9,6 +9,7 @@ dependencies = [
   "pydantic-settings>=2.4",
   "cryptography>=43",
   "openpyxl>=3.1",
+  "pydantic>=2.7",
 ]
 
 [project.optional-dependencies]
@@ -16,6 +17,9 @@ dependencies = [
 parse = ["docling>=2.0"]
 # NER-basierte Pseudonymisierung (zusätzlich zu Listen und Regeln)
 ner = ["presidio-analyzer>=2.2", "spacy>=3.7"]
+# LLM-Anbindung (Cloud oder lokal) und lokale Embeddings
+llm = ["litellm>=1.50"]
+embed = ["sentence-transformers>=3.0"]
 dev = ["pytest>=8"]
 
 [project.scripts]

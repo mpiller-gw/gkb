@@ -3,7 +3,8 @@ from openpyxl import Workbook
 
 from gkb.connectors.nextcloud import parse_multistatus
 from gkb.ingest.kunden import read_lexoffice
-from gkb.ingest.pipeline import entscheide, rechte_partition
+from gkb.connectors.nextcloud_rechte import PfadRechte
+from gkb.ingest.pipeline import entscheide
 from gkb.ingest.pseudonymize import MemoryVault, Pseudonymizer
 from gkb.storage import store_original
 
@@ -65,9 +66,17 @@ def test_duplikat_entscheidung():
     assert e.status == "update" and e.verarbeiten
 
 
-def test_rechte_partition():
-    assert rechte_partition("Projekte/Kunde A/2025/Angebot.pdf", "Projekte", 1) == "Projekte/Kunde A"
-    assert rechte_partition("Projekte/Notiz.txt", "Projekte", 1) == "Projekte"
+def test_pfad_rechte_fallback():
+    p = PfadRechte(1)
+    assert p.partition("Projekte/Kunde A/2025/Angebot.pdf", "Projekte").erlaubt == {"pfad:Projekte/Kunde A"}
+    assert p.partition("Projekte/Notiz.txt", "Projekte").erlaubt == {"pfad:Projekte"}
+    assert p.partition("Projekte/Kunde A/x.pdf", "Projekte").id == p.partition("Projekte/Kunde A/y.pdf", "Projekte").id
+
+
+def test_datum_ist_keine_telefonnummer():
+    p = Pseudonymizer(vault())
+    out = p.pseudonymize("Laufzeit 01.10.2025 - 31.12.2025, Rückfragen unter 089 1234 5678")
+    assert "01.10.2025 - 31.12.2025" in out and "[TELEFON_0001]" in out
 
 
 def test_original_ablage_nach_hash(tmp_path):
