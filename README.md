@@ -40,13 +40,30 @@ Konzept: [GKB – Konzept: KI-Wissensschicht](https://claude.ai/artifact/Ap4L6vt
 
 ## Einrichtung auf dem Server (Hetzner, Docker)
 
+Einmalig als root auf einem neuen Ubuntu-LTS-Server (Standort Deutschland):
+
 ```bash
-git clone <repo> gkb && cd gkb
-cp .env.example .env          # Werte eintragen, Schlüssel erzeugen (siehe Kommentare)
-chmod 600 .env
+git clone https://github.com/mpiller-gw/gkb.git /opt/gkb && cd /opt/gkb
+ADMIN_CIDR=<eure-IP>/32 bash scripts/server-setup.sh      # Updates, Benutzer gkb, SSH-Härtung, ufw, Docker, Backup-Timer
+bash scripts/volume-verschluesseln.sh /dev/disk/by-id/scsi-0HC_Volume_<id>   # LUKS, eingehängt unter /srv/gkb-data
+chown -R gkb:gkb /opt/gkb
+```
+
+Danach als Benutzer `gkb`:
+
+```bash
+cd /opt/gkb
+cp .env.example .env && chmod 600 .env    # Werte eintragen, Passwörter und Tresor-Schlüssel erzeugen
 docker compose up -d db
 docker compose run --rm app init-db
 ```
+
+Nach einem Neustart des Servers: `sudo bash scripts/volume-verschluesseln.sh --entsperren <gerät>`,
+dann `docker compose up -d db`. Die Passphrase liegt bewusst nicht auf dem Server.
+
+**Backup:** täglich 02:30 über `gkb-backup.timer` – Datenbank-Dump und Originale, verschlüsselt mit
+restic, z. B. auf eine Hetzner Storage Box (`/etc/gkb/backup.env`). Nicht im Backup und deshalb
+getrennt außerhalb des Servers zu sichern: `.env` (Tresor-Schlüssel), restic-Passwort, LUKS-Passphrase.
 
 Kundenliste importieren (Export nach `./import/` legen):
 

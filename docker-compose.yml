@@ -7,7 +7,8 @@ services:
       POSTGRES_DB: gkb
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-gkb}
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      # Daten auf dem (verschlüsselten) Datenverzeichnis, Standard ./data
+      - ${GKB_DATA_DIR:-./data}/postgres:/var/lib/postgresql/data
     # Kein Port nach außen: nur im internen Docker-Netz erreichbar
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U gkb"]
@@ -24,10 +25,7 @@ services:
       db:
         condition: service_healthy
     volumes:
-      - originale:/data/originale
+      - ${GKB_DATA_DIR:-./data}/originale:/data/originale
       - ./import:/import:ro
     profiles: ["tools"]
 
-volumes:
-  pgdata:
-  originale:
