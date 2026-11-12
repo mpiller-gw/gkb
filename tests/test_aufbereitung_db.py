@@ -163,3 +163,20 @@ def test_aufbereitung_ablauf():
     for t in ("abschnitt", "angebot", "angebotsposition"):
         assert conn.execute(f"SELECT count(*) AS n FROM {t} WHERE rohdokument_id=%s", (d_docx,)).fetchone()["n"] == 0
     conn.close()
+
+
+def test_tolerante_pruefung_fuer_lokale_modelle():
+    from gkb.aufbereitung.fakten import AngebotDaten
+    from gkb.aufbereitung.klingelschild import SchildEntwurf
+    e = SchildEntwurf.model_validate({
+        "titel": " ".join(["Wort"] * 15), "kurzbeschreibung": "Kurz.", "beantwortet_fragen": "Eine Frage?",
+        "dokumenttyp": None, "themen": ["A", "B", "C", "D"], "zeitraum": "Q3/2025", "sprache": "Deutsch",
+        "kennzahlen": [{"name": "Umsatz", "wert": "1.234,50 EUR"}, {"name": "x", "wert": "n/a"}],
+        "stand": "15.08.2025", "gueltig_bis": "kein Datum"})
+    assert len(e.titel.split()) == 13 and e.titel.endswith("…")      # 12 Wörter + Auslassungszeichen
+    assert e.themen == ["A", "B", "C"] and e.zeitraum == "2025" and e.sprache == "de"
+    assert [k.wert for k in e.kennzahlen] == [1234.5] and e.dokumenttyp == "Sonstiges"
+    assert str(e.stand) == "2025-08-15" and e.gueltig_bis is None
+    a = AngebotDaten.model_validate({"gesamt_netto": "48.500,00 €", "gueltig_bis": "30.09.2025",
+                                     "positionen": [{"leistung": "Konzeption", "gesamt": "12.000,00"}, {"gesamt": 5}]})
+    assert a.gesamt_netto == 48500.0 and len(a.positionen) == 1 and a.positionen[0].gesamt == 12000.0

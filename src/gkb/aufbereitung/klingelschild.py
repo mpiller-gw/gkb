@@ -19,16 +19,45 @@ def _woerter(s: str) -> int:
     return len(s.split())
 
 
-def _pruefe_titel(v: str) -> str:
-    if _woerter(v) > 12:
-        raise ValueError("titel: höchstens 12 Wörter")
-    return v.strip()
+# Weiche Vorgaben werden korrigiert statt abgelehnt: Gerade lokale Modelle halten Längen und
+# Anzahlen nicht immer exakt ein. Abgelehnt wird nur, was unbrauchbar ist (z. B. kein Titel).
+
+def _kuerze_woerter(v: str, n: int) -> str:
+    w = str(v).split()
+    return " ".join(w[:n]) + (" …" if len(w) > n else "")
 
 
-def _pruefe_kurz(v: str) -> str:
-    if _woerter(v) > 60:
-        raise ValueError("kurzbeschreibung: höchstens 60 Wörter")
-    return v.strip()
+def _als_liste(v) -> list:
+    if v is None:
+        return []
+    if isinstance(v, str):
+        return [v] if v.strip() else []
+    return list(v)
+
+
+def _datum(v):
+    if v in (None, "", "null"):
+        return None
+    if isinstance(v, date):
+        return v
+    s = str(v).strip()
+    m = re.fullmatch(r"(\d{1,2})\.(\d{1,2})\.(\d{4})", s)          # deutsches Format 15.08.2025
+    try:
+        return date(int(m[3]), int(m[2]), int(m[1])) if m else date.fromisoformat(s[:10])
+    except ValueError:
+        return None
+
+
+def _als_zahl(v) -> float | None:
+    if isinstance(v, (int, float)):
+        return float(v)
+    s = re.sub(r"[^\d,.\-]", "", str(v))
+    if "," in s:
+        s = s.replace(".", "").replace(",", ".")
+    try:
+        return float(s)
+    except ValueError:
+        return None
 
 
 class Kennzahl(BaseModel):
@@ -37,39 +66,92 @@ class Kennzahl(BaseModel):
     einheit: str = ""
 
 
-class SchildEntwurf(BaseModel):
+class _Basis(BaseModel):
+    titel: str = Field(min_length=1)
+    kurzbeschreibung: str = Field(min_length=1)
+    beantwortet_fragen: list[str] = Field(min_length=1)
+
+    @field_validator("titel", mode="before")
+    @classmethod
+    def _titel(cls, v):
+        return _kuerze_woerter(v, 12).strip() if v else v
+
+    @field_validator("kurzbeschreibung", mode="before")
+    @classmethod
+    def _kurz(cls, v):
+        return _kuerze_woerter(v, 60).strip() if v else v
+
+    @field_validator("beantwortet_fragen", mode="before")
+    @classmethod
+    def _fragen(cls, v):
+        return [str(f).strip() for f in _als_liste(v) if str(f).strip()][:5]
+
+
+class SchildEntwurf(_Basis):
     """Was das LLM liefert. IDs, Rechte, Quelle und Größen ergänzt GKB selbst."""
-    titel: str
-    kurzbeschreibung: str
-    beantwortet_fragen: list[str] = Field(min_length=3, max_length=5)
-    dokumenttyp: str
-    themen: list[str] = Field(default_factory=list, max_length=3)
+    dokumenttyp: str = "Sonstiges"
+    themen: list[str] = Field(default_factory=list)
     zeitraum: str | None = None
     status: str | None = None
     sprache: Literal["de", "en"] = "de"
     kunden_namen: list[str] = Field(default_factory=list)
-    kennzahlen: list[Kennzahl] = Field(default_factory=list, max_length=5)
+    kennzahlen: list[Kennzahl] = Field(default_factory=list)
     stand: date | None = None
     gueltig_bis: date | None = None
 
-    _t = field_validator("titel")(lambda cls, v: _pruefe_titel(v))
-    _k = field_validator("kurzbeschreibung")(lambda cls, v: _pruefe_kurz(v))
-
-    @field_validator("zeitraum")
+    @field_validator("dokumenttyp", mode="before")
     @classmethod
-    def _zeitraum(cls, v: str | None) -> str | None:
-        if v and not re.fullmatch(r"\d{4}(-Q[1-4])?", v):
-            raise ValueError("zeitraum: Format JJJJ oder JJJJ-Qn")
-        return v
+    def _typ(cls, v):
+        return str(v).strip() if v else "Sonstiges"
+
+    @field_validator("themen", mode="before")
+    @classmethod
+    def _themen(cls, v):
+        return [str(t).strip() for t in _als_liste(v) if str(t).strip()][:3]
+
+    @field_validator("kunden_namen", mode="before")
+    @classmethod
+    def _kunden(cls, v):
+        return [str(k).strip() for k in _als_liste(v) if str(k).strip()][:10]
+
+    @field_validator("kennzahlen", mode="before")
+    @classmethod
+    def _kennzahlen(cls, v):
+        out = []
+        for k in _als_liste(v):
+            if isinstance(k, dict) and k.get("name") and _als_zahl(k.get("wert")) is not None:
+                out.append({**k, "wert": _als_zahl(k["wert"]), "einheit": k.get("einheit") or ""})
+        return out[:5]
+
+    @field_validator("zeitraum", mode="before")
+    @classmethod
+    def _zeitraum(cls, v):
+        if not v:
+            return None
+        v = str(v).strip()
+        if re.fullmatch(r"\d{4}(-Q[1-4])?", v):
+            return v
+        jahr = re.search(r"\b(19|20)\d{2}\b", v)
+        return jahr.group(0) if jahr else None
+
+    @field_validator("status", mode="before")
+    @classmethod
+    def _status(cls, v):
+        return None if v in (None, "", "null") else str(v)
+
+    @field_validator("sprache", mode="before")
+    @classmethod
+    def _sprache(cls, v):
+        return "en" if str(v or "").lower().startswith("en") else "de"
+
+    @field_validator("stand", "gueltig_bis", mode="before")
+    @classmethod
+    def _daten(cls, v):
+        return _datum(v)
 
 
-class ClusterEntwurf(BaseModel):
-    titel: str
-    kurzbeschreibung: str
-    beantwortet_fragen: list[str] = Field(min_length=3, max_length=5)
-
-    _t = field_validator("titel")(lambda cls, v: _pruefe_titel(v))
-    _k = field_validator("kurzbeschreibung")(lambda cls, v: _pruefe_kurz(v))
+class ClusterEntwurf(_Basis):
+    pass
 
 
 SYSTEM_SCHILD = """KLINGELSCHILD

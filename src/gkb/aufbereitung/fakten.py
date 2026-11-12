@@ -11,8 +11,9 @@ from __future__ import annotations
 from datetime import date
 from pathlib import PurePosixPath
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
+from gkb.aufbereitung.klingelschild import _als_liste, _als_zahl, _datum
 from gkb.aufbereitung.llm import LLM, frage
 
 TOLERANZ_EUR = 1.0
@@ -37,6 +38,16 @@ class Position(BaseModel):
     einzelpreis: float | None = None
     gesamt: float | None = None
 
+    @field_validator("menge", "einzelpreis", "gesamt", mode="before")
+    @classmethod
+    def _zahlen(cls, v):          # "1.200,00 €" -> 1200.0, Unlesbares -> None
+        return None if v in (None, "", "null") else _als_zahl(v)
+
+    @field_validator("position", "einheit", mode="before")
+    @classmethod
+    def _text(cls, v):
+        return None if v in (None, "") else str(v)
+
 
 class AngebotDaten(BaseModel):
     angebotsnummer: str | None = None
@@ -44,6 +55,27 @@ class AngebotDaten(BaseModel):
     gesamt_netto: float | None = None
     gueltig_bis: date | None = None
     positionen: list[Position] = Field(default_factory=list)
+
+    @field_validator("gesamt_netto", mode="before")
+    @classmethod
+    def _gesamt(cls, v):
+        return None if v in (None, "", "null") else _als_zahl(v)
+
+    @field_validator("gueltig_bis", mode="before")
+    @classmethod
+    def _bis(cls, v):
+        return _datum(v)
+
+    @field_validator("angebotsnummer", "version", mode="before")
+    @classmethod
+    def _text(cls, v):
+        return None if v in (None, "", "null") else str(v)
+
+    @field_validator("positionen", mode="before")
+    @classmethod
+    def _positionen(cls, v):      # Zeilen ohne Leistungsbezeichnung verwerfen statt das ganze Angebot
+        return [p for p in _als_liste(v)
+                if isinstance(p, Position) or (isinstance(p, dict) and p.get("leistung"))]
 
 
 def fassung(pfad: str, mime: str = "") -> str:
