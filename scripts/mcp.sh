@@ -15,4 +15,7 @@ NUTZER="${1:-}"
 cd "$(dirname "$0")/.."
 # Fortschrittsmeldungen von Compose dürfen stdout nicht stören (stdout = MCP-Protokoll)
 export COMPOSE_PROGRESS=quiet
-exec docker compose run --rm -T --no-deps app mcp --nutzer "$NUTZER" 2>>"${GKB_MCP_LOG:-/tmp/gkb-mcp.log}"
+# Der MCP-Server braucht keine GPU (ein Embedding je Frage auf der CPU); CUDA_VISIBLE_DEVICES leer hält
+# ihn auch dann von der Karte fern, wenn docker-compose.gpu.yml aktiv ist.
+exec docker compose run --rm -T --no-deps -e CUDA_VISIBLE_DEVICES= app mcp --nutzer "$NUTZER" \
+  2>>"${GKB_MCP_LOG:-/tmp/gkb-mcp.log}"

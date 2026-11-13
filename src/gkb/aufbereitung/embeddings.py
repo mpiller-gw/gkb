@@ -18,10 +18,11 @@ class Embedder(Protocol):
 class SentenceTransformerEmbedder:
     """Standard: intfloat/multilingual-e5-large (mehrsprachig, 1024 Dimensionen)."""
 
-    def __init__(self, model: str = "intfloat/multilingual-e5-large"):
+    def __init__(self, model: str = "intfloat/multilingual-e5-large", device: str | None = None):
+        """device: None = automatisch (GPU falls frei), "cpu" oder "cuda"."""
         from sentence_transformers import SentenceTransformer
         self.name = model
-        self._m = SentenceTransformer(model)
+        self._m = SentenceTransformer(model, device=device or None)
         if self._m.get_sentence_embedding_dimension() != DIM:
             raise ValueError(f"{model} hat nicht {DIM} Dimensionen")
 

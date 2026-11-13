@@ -48,7 +48,8 @@ def main(argv: list[str] | None = None) -> None:
         from gkb.aufbereitung.embeddings import SentenceTransformerEmbedder
         nutzer = nutzer_laden(args.nutzer, s)
         logging.info("MCP-Server für %s (admin=%s, %d Principals)", nutzer.id, nutzer.admin, len(nutzer.principals))
-        baue_server(lambda: connect(s.database_url), SentenceTransformerEmbedder(s.embedding_modell), nutzer).run("stdio")
+        emb = SentenceTransformerEmbedder(s.embedding_modell, device=s.embedding_geraet_abfrage)
+        baue_server(lambda: connect(s.database_url), emb, nutzer).run("stdio")
         return
 
     if args.cmd == "systemcheck":    # braucht weder Datenbank noch Tresor

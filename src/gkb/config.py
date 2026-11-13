@@ -33,6 +33,8 @@ class Settings(BaseSettings):
     modell_klein: str = ""                    # LiteLLM-Modellname für Tags, Klingelschilder, Fakten
     modell_klein_api_base: str = ""           # nur für lokale Modelle, z. B. http://llm:8000/v1
     embedding_modell: str = "intfloat/multilingual-e5-large"
+    # MCP-Server: nur ein kurzes Embedding je Frage -> CPU reicht und lässt die GPU für vLLM frei
+    embedding_geraet_abfrage: str = "cpu"
     llm_max_len: int = 16384                  # Kontextfenster des Modells (GKB_LLM_MAX_LEN, wie bei vLLM)
     kunde_ebene: int = 1                      # Ordnerebene unter dem Wurzelordner mit dem Kundennamen (0 = aus)
     projekt_ebene: int = 2                    # Ordnerebene mit dem Projekt (0 = aus)
