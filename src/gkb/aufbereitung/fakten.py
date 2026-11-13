@@ -103,8 +103,10 @@ def pruefe(d: AngebotDaten) -> tuple[str, str, float | None]:
     return "ok", "", summe
 
 
-def extrahiere(llm: LLM, markdown: str) -> AngebotDaten:
-    return frage(llm, SYSTEM_ANGEBOT, "<dokument>\n" + markdown[:48000] + "\n</dokument>", AngebotDaten)
+def extrahiere(llm: LLM, markdown: str, kontext_tokens: int = 16384) -> AngebotDaten:
+    # Deutsche Texte haben eher ~3 Zeichen je Token; Reserve für Anweisung und Antwort (2.000 Tokens)
+    max_zeichen = max(4000, min(48000, (kontext_tokens - 3500) * 3))
+    return frage(llm, SYSTEM_ANGEBOT, "<dokument>\n" + markdown[:max_zeichen] + "\n</dokument>", AngebotDaten)
 
 
 def speichere(conn, doc: dict, d: AngebotDaten, kunde: str | None, projekt: str | None) -> str:

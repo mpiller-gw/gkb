@@ -117,7 +117,8 @@ def main(argv: list[str] | None = None) -> None:
     if args.cmd == "aufbereiten":
         from gkb.aufbereitung.run import aufbereiten
         llm, emb = _modelle(s, args.trocken)
-        z = aufbereiten(conn, llm, emb, _pseudonymizer(conn, vault, False), s.kunde_ebene, s.projekt_ebene)
+        z = aufbereiten(conn, llm, emb, _pseudonymizer(conn, vault, False), s.kunde_ebene, s.projekt_ebene,
+                        s.llm_max_len)
         print(json.dumps(dict(z), ensure_ascii=False))
         return
 

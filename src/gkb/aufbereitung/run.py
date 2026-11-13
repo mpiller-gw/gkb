@@ -79,7 +79,7 @@ class Zuordnung:
 
 
 def aufbereiten(conn, llm: LLM, embedder: Embedder, pseudo, kunde_ebene: int = 1,
-                projekt_ebene: int = 2) -> Counter:
+                projekt_ebene: int = 2, kontext_tokens: int = 16384) -> Counter:
     z: Counter = Counter()
     vorbelegen(conn)
     vok = Vokabular(conn)
@@ -106,7 +106,7 @@ def aufbereiten(conn, llm: LLM, embedder: Embedder, pseudo, kunde_ebene: int = 1
     ).fetchall()
     for doc in docs:
         try:
-            z[_einheit(conn, llm, embedder, vok, zu, doc)] += 1
+            z[_einheit(conn, llm, embedder, vok, zu, doc, kontext_tokens)] += 1
             conn.commit()
         except Exception:
             conn.rollback()
@@ -115,12 +115,13 @@ def aufbereiten(conn, llm: LLM, embedder: Embedder, pseudo, kunde_ebene: int = 1
 
     z["fassungen_abweichend"] = fakten.abgleich_fassungen(conn)
     conn.commit()
-    z.update({f"cluster_{k}": v for k, v in cluster_bauen(conn, llm, embedder).items()})
+    z.update({f"cluster_{k}": v for k, v in cluster_bauen(conn, llm, embedder, pseudo, kontext_tokens).items()})
     conn.commit()
     return z
 
 
-def _einheit(conn, llm: LLM, embedder: Embedder, vok: Vokabular, zu: Zuordnung, doc: dict) -> str:
+def _einheit(conn, llm: LLM, embedder: Embedder, vok: Vokabular, zu: Zuordnung, doc: dict,
+             kontext_tokens: int = 16384) -> str:
     wissensraum, kunde, projekt = zu.fuer(doc["pfad"])
     schluessel = str(doc["id"])
     inhalt_hash = _h(doc["sha256"], PROMPT_VERSION, fakten.PROMPT_VERSION, llm.name, embedder.name,
@@ -186,7 +187,7 @@ def _einheit(conn, llm: LLM, embedder: Embedder, vok: Vokabular, zu: Zuordnung, 
 
     # 3. Faktentabelle für Angebote
     if tags.get("dokumenttyp") == "Angebot":
-        d = fakten.extrahiere(llm, doc["markdown_pseudo"])
+        d = fakten.extrahiere(llm, doc["markdown_pseudo"], kontext_tokens)
         st = fakten.speichere(conn, doc, d, kunde and kunde["kundennummer"], projekt and projekt["id"])
         if d.gesamt_netto is not None:
             kennzahlen = [k for k in kennzahlen if "gesamt" not in k["name"].lower()]
@@ -261,18 +262,53 @@ def _tags(vok: Vokabular, roh: dict, wissensraum: str, kunde, projekt) -> dict:
 # Cluster-Schilder: Projekt -> Kunde -> Wissensraum, jeweils pro Rechte-Partition
 # ------------------------------------------------------------------------------------------
 
-def cluster_bauen(conn, llm: LLM, embedder: Embedder) -> Counter:
+MAX_KINDER = 40          # größere Ordnergruppen werden in Unterordner-Cluster aufgeteilt
+
+
+def _kinderliste(kinder: list[dict], budget_tokens: int) -> str:
+    """Liste für den Cluster-Prompt innerhalb des Token-Budgets: erst mit Kurzbeschreibung,
+    dann nur Titel, zuletzt gekürzt mit Hinweis auf die Restmenge."""
+    voll = [f"- [{k['id']}] {k['daten']['titel']}: {k['daten']['kurzbeschreibung']}" for k in kinder]
+    if schaetze_tokens("\n".join(voll)) <= budget_tokens:
+        return "\n".join(voll)
+    titel = [f"- [{k['id']}] {k['daten']['titel']}" for k in kinder]
+    out, summe = [], 0
+    for i, zeile in enumerate(titel):
+        summe += schaetze_tokens(zeile) + 1
+        if summe > budget_tokens:
+            out.append(f"- … und {len(titel) - i} weitere")
+            break
+        out.append(zeile)
+    return "\n".join(out)
+
+
+def cluster_bauen(conn, llm: LLM, embedder: Embedder, pseudo=None, kontext_tokens: int = 16384) -> Counter:
     z: Counter = Counter()
     aktiv: set[str] = set()
+    # Platz für Anweisung und Antwort lassen; Schätzung ist grob, daher großzügige Reserve
+    budget = max(1500, int(kontext_tokens * 0.45) - 1000)
     einheiten = conn.execute(
-        "SELECT id, daten, eingabe_hash, rechte_partition FROM klingelschild WHERE ebene='einheit'"
+        """SELECT k.id, k.daten, k.eingabe_hash, k.rechte_partition, r.pfad
+           FROM klingelschild k JOIN rohdokument r ON r.id = k.rohdokument_id WHERE k.ebene='einheit'"""
     ).fetchall()
     namen = {r["id"]: r["name"] for r in conn.execute("SELECT id, name FROM projekt").fetchall()}
     kundennamen = {r["kundennummer"]: r["name"] for r in conn.execute("SELECT kundennummer, name FROM kunde")}
 
+    def entwurf(ebene: str, label: str, kinder: list[dict]) -> ClusterEntwurf:
+        try:
+            return frage(llm, SYSTEM_CLUSTER,
+                         f"Ebene: {ebene} {label}\n\n<einheiten>\n{_kinderliste(kinder, budget)}\n</einheiten>",
+                         ClusterEntwurf)
+        except Exception as e:  # Cluster ohne LLM-Text ist besser als gar keine Übersicht
+            log.warning("Cluster %s '%s' ohne LLM erzeugt: %s", ebene, label, str(e)[:200])
+            z["ersatz"] += 1
+            return ClusterEntwurf(titel=f"Übersicht {label}"[:120],
+                                  kurzbeschreibung=f"Übersicht über {len(kinder)} Einträge in {label}.",
+                                  beantwortet_fragen=[f"Was gehört zu {label}?", "Welche Dokumente gibt es hier?"])
+
     def baue(ebene: str, kinder_nach_key: dict[tuple, list[dict]], label) -> list[dict]:
         neue = []
-        for (key, partition), kinder in sorted(kinder_nach_key.items()):
+        for (key, partition), kinder in sorted(kinder_nach_key.items(), key=lambda kv: (str(kv[0][0]), kv[0][1])):
             kinder = sorted(kinder, key=lambda k: k["id"])
             cid = f"kc-{ebene}-{_h(key, partition)[:10]}"
             aktiv.add(cid)
@@ -282,10 +318,7 @@ def cluster_bauen(conn, llm: LLM, embedder: Embedder) -> Counter:
                 z[f"{ebene}_unveraendert"] += 1
                 daten = alt["daten"]
             else:
-                liste = "\n".join(f"- [{k['id']}] {k['daten']['titel']}: {k['daten']['kurzbeschreibung']}"
-                                  for k in kinder)
-                c = frage(llm, SYSTEM_CLUSTER, f"Ebene: {ebene} {label(key)}\n\n<einheiten>\n{liste}\n</einheiten>",
-                          ClusterEntwurf)
+                c = entwurf(ebene, label(key), kinder)
                 zeitraeume = sorted({k["daten"]["tags"].get("zeitraum", "")[:4] for k in kinder} - {""})
                 tags = {"ebene": ebene, "wissensraum": kinder[0]["daten"]["tags"].get("wissensraum")}
                 if ebene in ("projekt", "kunde") and kinder[0]["daten"]["tags"].get("kunde"):
@@ -323,18 +356,44 @@ def cluster_bauen(conn, llm: LLM, embedder: Embedder) -> Counter:
             conn.execute("UPDATE klingelschild SET eltern_id=%s WHERE id = ANY(%s)", (cid, [k["id"] for k in kinder]))
             neue.append({"id": cid, "daten": daten, "eingabe_hash": eh, "rechte_partition": partition,
                          "key": key})
+            conn.commit()
         return neue
+
+    def ordner_label(prefix: str) -> str:
+        name = prefix.rsplit("/", 1)[-1]
+        return pseudo.pseudonymize(name) if pseudo else name
+
+    def baue_ordner(items: list[dict], tiefe: int) -> list[dict]:
+        """Einheiten ohne Kunde/Projekt entlang der Ordnerstruktur zusammenfassen.
+        Ordner mit mehr als MAX_KINDER Einträgen werden in Unterordner-Cluster aufgeteilt."""
+        gruppen: dict[tuple, list] = defaultdict(list)
+        for i in items:
+            gruppen[("/".join(i["ordner"][:tiefe]), i["rechte_partition"])].append(i)
+        ergebnis = []
+        for key, gruppe in gruppen.items():
+            direkt = [i for i in gruppe if len(i["ordner"]) <= tiefe]
+            tiefer = [i for i in gruppe if len(i["ordner"]) > tiefe]
+            kinder = gruppe
+            if len(gruppe) > MAX_KINDER and tiefer:
+                unter = baue_ordner(tiefer, tiefe + 1)
+                kinder = direkt + unter if len(unter) > 1 or direkt else gruppe
+            ergebnis += baue("ordner", {key: kinder}, ordner_label)
+        return ergebnis
 
     # Ebene Projekt
     nach_projekt: dict[tuple, list] = defaultdict(list)
     rest_kunde: dict[tuple, list] = defaultdict(list)
     rest_raum: dict[tuple, list] = defaultdict(list)
+    ohne_zuordnung: list[dict] = []
     for e in einheiten:
         t = e["daten"]["tags"]
+        e = {**e, "ordner": PurePosixPath(e["pfad"]).parts[:-1]}
         if t.get("projekt"):
             nach_projekt[(t["projekt"], e["rechte_partition"])].append(e)
         elif t.get("kunde"):
             rest_kunde[(t["kunde"], e["rechte_partition"])].append(e)
+        elif len(e["ordner"]) >= 2:
+            ohne_zuordnung.append(e)
         else:
             rest_raum[(t.get("wissensraum"), e["rechte_partition"])].append(e)
     projekte = baue("projekt", nach_projekt, lambda k: namen.get(k, k))
@@ -348,6 +407,10 @@ def cluster_bauen(conn, llm: LLM, embedder: Embedder) -> Counter:
         else:
             rest_raum[(p["daten"]["tags"].get("wissensraum"), p["rechte_partition"])].append(p)
     kunden = baue("kunde", nach_kunde, lambda k: kundennamen.get(k, k))
+
+    # Ebene Ordner: Einheiten ohne Kunde/Projekt entlang der Ordnerstruktur
+    for o in baue_ordner(ohne_zuordnung, 2):
+        rest_raum[(o["daten"]["tags"].get("wissensraum"), o["rechte_partition"])].append(o)
 
     # Ebene Wissensraum
     for k in kunden:

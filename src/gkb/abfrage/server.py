@@ -55,7 +55,7 @@ def baue_server(conn_fabrik, embedder, nutzer: Nutzer) -> MCPServer:
                                zeitraum: str | None = None, ebene: str | None = None, anzahl: int = 15) -> list[dict]:
         """Stufe 2: Steckbriefe passender Dokumente/Übersichten suchen.
         Filter (optional) mit Werten aus tags_uebersicht; zeitraum z. B. '2024' oder '2024-Q3';
-        ebene: 'einheit' (Dokumente), 'projekt', 'kunde', 'wissensraum' (Übersichten)."""
+        ebene: 'einheit' (Dokumente), 'ordner', 'projekt', 'kunde', 'wissensraum' (Übersichten)."""
         f = {"dokumenttyp": dokumenttyp, "thema": thema, "kunde": kunde, "wissensraum": wissensraum,
              "zeitraum": zeitraum}
         protokoll("klingelschilder_suchen", {"frage": frage, **{k: v for k, v in f.items() if v}, "ebene": ebene})

@@ -180,3 +180,42 @@ def test_tolerante_pruefung_fuer_lokale_modelle():
     a = AngebotDaten.model_validate({"gesamt_netto": "48.500,00 €", "gueltig_bis": "30.09.2025",
                                      "positionen": [{"leistung": "Konzeption", "gesamt": "12.000,00"}, {"gesamt": 5}]})
     assert a.gesamt_netto == 48500.0 and len(a.positionen) == 1 and a.positionen[0].gesamt == 12000.0
+
+
+def test_kinderliste_bleibt_im_budget():
+    from gkb.aufbereitung.run import _kinderliste
+    kinder = [{"id": f"ke-{i}", "daten": {"titel": f"Dokument {i}", "kurzbeschreibung": "Satz " * 40}}
+              for i in range(600)]
+    liste = _kinderliste(kinder, 6000)                      # Titel passen, Beschreibungen nicht
+    assert schaetze_tokens(liste) <= 6000 and "Satz" not in liste and "ke-599" in liste
+    knapp = _kinderliste(kinder, 1000)                      # nicht einmal alle Titel passen
+    assert schaetze_tokens(knapp) <= 1050 and "weitere" in knapp
+
+
+@pytest.mark.skipif(not URL, reason="GKB_TEST_DATABASE_URL nicht gesetzt")
+def test_ordner_cluster_ohne_kunde_und_projekt():
+    """Viele Dokumente ohne Kunde/Projekt: Übersichten entstehen entlang der Ordner, keine ist zu groß."""
+    conn = connect(URL)
+    conn.execute("DROP SCHEMA public CASCADE; CREATE SCHEMA public;")
+    conn.commit()
+    init_db(conn)
+    qid = quelle_id(conn, "nextcloud", "test")
+    conn.execute("INSERT INTO rechte_partition (id, erlaubt) VALUES ('rp', '{group:gf}')")
+    pfade = ([f"DD/Legal/Beschluesse/Beschluss {i}.md" for i in range(45)]
+             + [f"DD/Legal/Vertraege/Vertrag {i}.md" for i in range(10)]
+             + [f"DD/Finanzen/Bericht {i}.md" for i in range(5)] + ["DD/Index.md"])
+    for i, pfad in enumerate(pfade):
+        conn.execute(
+            """INSERT INTO rohdokument (quelle_id, externe_id, titel, pfad, sha256, markdown_pseudo, rechte_partition)
+               VALUES (%s,%s,%s,%s,%s,%s,'rp')""", (qid, str(i), pfad.rsplit("/", 1)[1][:-3], pfad, f"s{i}", f"# {pfad}\n\nText."))
+    conn.commit()
+    pseudo = Pseudonymizer(PgVault(conn, Fernet.generate_key().decode(), "h"))
+    z = aufbereiten(conn, PlatzhalterLLM(), HashEmbedder(), pseudo, kunde_ebene=0, projekt_ebene=0)
+    assert z["fehler"] == 0
+    cl = conn.execute("SELECT ebene, schluessel, daten FROM klingelschild WHERE typ='cluster'").fetchall()
+    ordner = {c["schluessel"] for c in cl if c["ebene"] == "ordner"}
+    assert {"DD/Legal", "DD/Legal/Beschluesse", "DD/Legal/Vertraege", "DD/Finanzen"} <= ordner
+    assert max(len(c["daten"]["kinder"]) for c in cl) <= 45
+    raum = next(c for c in cl if c["ebene"] == "wissensraum")
+    assert len(raum["daten"]["kinder"]) == 3          # Legal, Finanzen, Index.md
+    conn.close()
