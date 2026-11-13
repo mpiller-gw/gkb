@@ -45,10 +45,10 @@ def main(argv: list[str] | None = None) -> None:
     if args.cmd == "mcp":
         from gkb.abfrage.server import baue_server
         from gkb.abfrage.zugriff import nutzer_laden
-        from gkb.aufbereitung.embeddings import SentenceTransformerEmbedder
+        from gkb.aufbereitung.embeddings import LazyEmbedder, SentenceTransformerEmbedder
         nutzer = nutzer_laden(args.nutzer, s)
         logging.info("MCP-Server für %s (admin=%s, %d Principals)", nutzer.id, nutzer.admin, len(nutzer.principals))
-        emb = SentenceTransformerEmbedder(s.embedding_modell, device=s.embedding_geraet_abfrage)
+        emb = LazyEmbedder(lambda: SentenceTransformerEmbedder(s.embedding_modell, device=s.embedding_geraet_abfrage))
         baue_server(lambda: connect(s.database_url), emb, nutzer).run("stdio")
         return
 

@@ -32,6 +32,22 @@ class SentenceTransformerEmbedder:
         return [v.tolist() for v in vecs]
 
 
+class LazyEmbedder:
+    """Lädt das eigentliche Modell erst beim ersten Aufruf. Der MCP-Server meldet sich so sofort beim
+    Client (kein Timeout beim Start); die erste Suche dauert dafür einige Sekunden länger."""
+
+    def __init__(self, fabrik):
+        self._fabrik = fabrik
+        self._e = None
+        self.name = "lazy"
+
+    def embed(self, texte: list[str], art: str = "passage") -> list[list[float]]:
+        if self._e is None:
+            self._e = self._fabrik()
+            self.name = self._e.name
+        return self._e.embed(texte, art)
+
+
 class HashEmbedder:
     """Deterministischer Ersatz für Tests und Trockenläufe (keine Semantik, nur Wortüberlappung)."""
 
